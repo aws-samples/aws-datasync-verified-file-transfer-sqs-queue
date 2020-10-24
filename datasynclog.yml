@@ -1,0 +1,180 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Capture verified file transfers from Datasync tasks, add the source path as S3 object user metadata, and create an SQS queue for any desired future operations"
+Parameters:
+    CodeBucket:
+        Type: String
+        Description:  Bucket containing lambda code for Datasync logging solution
+    DataSyncTaskID: 
+        Type: String
+        Description: Enter the Task ID for the DataSync Task to apply the solution to
+
+Resources:
+    DataSyncLogGroup:
+        Type: AWS::Logs::LogGroup
+
+    VerifiedFileQueue:
+        Type: AWS::SQS::Queue
+        
+    DataSyncLogLambdaRole:
+        Type: AWS::IAM::Role
+        Properties:
+            AssumeRolePolicyDocument:
+                Version: "2012-10-17"
+                Statement:
+                -
+                    Effect: "Allow"
+                    Principal:
+                        Service:
+                            - "lambda.amazonaws.com"
+                    Action: 
+                        - "sts:AssumeRole"
+            Policies:
+            -
+              PolicyName: "DataSyncS3Logging"
+              PolicyDocument:
+                Version: "2012-10-17"
+                Statement:
+                  -
+                    Effect: "Allow"
+                    Action:
+                      - "s3:ListAllMyBuckets"
+                    Resource: '*'
+                  -
+                    Effect: "Allow"
+                    Action:
+                      - "datasync:DescribeTask"
+                    Resource: !Sub 'arn:aws:datasync:${AWS::Region}:${AWS::AccountId}:task/${DataSyncTaskID}'
+                  -
+                    Effect: "Allow"
+                    Action:
+                      - "datasync:ListTasks"
+                      - "datasync:ListLocations"
+                    Resource: !Sub 'arn:aws:datasync:${AWS::Region}:${AWS::AccountId}:*'
+                  -
+                    Effect: "Allow"
+                    Action:
+                      - "sqs:SendMessage"
+                    Resource: !Sub ${VerifiedFileQueue.Arn}
+            ManagedPolicyArns:
+            - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+    DataSyncPrepLambdaRole:
+        Type: "AWS::IAM::Role"
+        Properties:
+          AssumeRolePolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              -
+                Effect: "Allow"
+                Principal:
+                  Service:
+                    - "lambda.amazonaws.com"
+                Action: 
+                  - "sts:AssumeRole"
+          Policies:
+            -
+              PolicyName: "DataSyncTaskList"
+              PolicyDocument:
+                Version: "2012-10-17"
+                Statement:
+                  -
+                    Effect: "Allow"
+                    Action:
+                      - "datasync:ListTasks"
+                      - "datasync:ListLocations"
+                    Resource: !Sub 'arn:aws:datasync:${AWS::Region}:${AWS::AccountId}:*'
+                  -
+                    Effect: "Allow"
+                    Action:
+                      - "datasync:UpdateTask"
+                      - "datasync:DescribeTask"
+                      - "datasync:ListLocations"
+                    Resource: !Sub 'arn:aws:datasync:${AWS::Region}:${AWS::AccountId}:task/${DataSyncTaskID}'
+                  -
+                    Effect: "Allow"
+                    Action:
+                      - "logs:PutResourcePolicy"
+                      - "logs:DescribeLogGroups"
+                    Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group::log-stream:'
+            -
+              PolicyName: "LambdaAddPerms"
+              PolicyDocument:
+                Version: "2012-10-17"
+                Statement:
+                  -
+                    Effect: "Allow"
+                    Action:
+                      - "lambda:AddPermission"
+                    Resource: !Sub ${DataSyncCWLogLambda.Arn}
+            -
+              PolicyName: "AddIAMPolicies"
+              PolicyDocument:
+                Version: "2012-10-17"
+                Statement:
+                  -
+                    Effect: "Allow"
+                    Action:
+                      - "iam:PutRolePolicy"
+                      - "iam:DeleteRolePolicy"
+                    Resource: !Sub ${DataSyncLogLambdaRole.Arn}
+          ManagedPolicyArns:
+            - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+   
+    DataSyncPrepLambda:
+        Type: AWS::Lambda::Function
+        Properties:
+            Handler: "lambda_function.lambda_handler"
+            MemorySize: 128
+            Role: !Sub ${DataSyncPrepLambdaRole.Arn}
+            Runtime: "python3.8"
+            Timeout: 300
+            Environment:
+                Variables:
+                    TASK_ID: !Sub ${DataSyncTaskID}
+                    LOG_GROUP_ARN: !GetAtt DataSyncLogGroup.Arn
+                    LAMBDA_FUNCTION: !GetAtt DataSyncCWLogLambda.Arn
+                    REGION: !Ref AWS::Region
+                    ACCOUNT: !Ref AWS::AccountId
+                    LAMBDA_ROLE: !Ref DataSyncLogLambdaRole
+            Code:
+                S3Bucket: !Sub ${CodeBucket}
+                S3Key: "datasync_log_prep.zip"
+        DependsOn: 
+          - DataSyncPrepLambdaRole
+
+    DataSyncPrepCustomResource:
+        Type: Custom::DataSyncLoggingPrepLambda
+        Properties:
+            ServiceToken: !Sub ${DataSyncPrepLambda.Arn}
+        DependsOn: DataSyncPrepLambda
+
+    DataSyncCWLogLambda:
+        Type: AWS::Lambda::Function
+        Properties:
+            Handler: "lambda_function.lambda_handler"
+            MemorySize: 128
+            Role: !Sub ${DataSyncLogLambdaRole.Arn}
+            Runtime: "python3.8"
+            Timeout: 300
+            Environment:
+                Variables:
+                    TASK_ID: !Sub ${DataSyncTaskID}
+                    SQS_QUEUE: !Ref VerifiedFileQueue
+            Code:
+                S3Bucket: !Sub ${CodeBucket}
+                S3Key: "datasync_log.zip"
+        DependsOn: 
+          - DataSyncLogLambdaRole
+          - VerifiedFileQueue            
+    DataSyncLogTrigger:
+        Type: AWS::Logs::SubscriptionFilter
+        Properties: 
+            DestinationArn: !Sub ${DataSyncCWLogLambda.Arn}
+            LogGroupName: !Ref DataSyncLogGroup
+            FilterPattern: "Verified file"
+
+        DependsOn:
+          - DataSyncLogGroup
+          - DataSyncCWLogLambda
+          - DataSyncPrepCustomResource
+
