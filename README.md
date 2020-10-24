@@ -5,7 +5,8 @@ deploy an AWS Lambda function that will parse the file level logging in the Clou
 populate an Amazon SQS queue with a list of successfully transferred files.  The source path of the file will also be attached to
 the S3 object as custome metadata.
 
-Prerequisites:
+**Prerequisites:**
+
 Download the contents of this GitHub repository. In the root directory, run the “makeZip.sh” script to create two zip files: datasync_log.zip 
 and datasync_log_prep.zip.  Place these two zip files and the datasynclog.yml CloudFormation template into an S3 bucket in your environment.  
 Ensure that the user deploying the solution has access to the bucket containing these files.  Note the name of the S3 bucket, as it will be an 
@@ -16,7 +17,7 @@ use for this solution, as it will be an input parameter for the CloudFormation t
 location is not an S3 bucket.  
 
 For more information on deploying and running the solution, refer to the blog post here:
-<insert blog post when published>
+
 
 ## Security
 
