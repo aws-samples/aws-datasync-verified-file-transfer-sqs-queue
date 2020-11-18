@@ -49,7 +49,7 @@ def lambda_handler(event, context):
         key = prefix + fileLoc[1:]
         # Add source path as user metadata on S3 object
         s3_object = s3.Object(target_loc, key)
-        s3_object.metadata.update({'source_path':source})
+        s3_object.metadata.update({'source-path':source})
         s3_object.copy_from(CopySource={'Bucket':target_loc, 'Key':key}, Metadata=s3_object.metadata, MetadataDirective='REPLACE')
         # Add source path to queue
         sqs.send_message(QueueUrl=sqs_queue,MessageBody=source)
