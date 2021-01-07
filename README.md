@@ -16,7 +16,7 @@ Ensure that you have a DataSync task created that has a destination type of “A
 use for this solution, as it will be an input parameter for the CloudFormation template.  The stack deployment will fail with an error if the target 
 location is not an S3 bucket.  
 
-For more information on deploying and running the solution, refer to the blog post here:
+For more information on deploying and running the solution, refer to the blog post here: https://aws.amazon.com/blogs/storage/post-process-your-transferred-data-with-file-level-logging-in-aws-datasync/
 
 
 ## Security
